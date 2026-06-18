@@ -1300,7 +1300,7 @@
       <!-- ════ CONFIGURAÇÕES ════ -->
       <div id="ecra-configuracoes" class="ecra">
         <div class="pg-titulo" style="margin-bottom:4px;">Configurações</div>
-        <div class="pg-sub">Personalize the sistema para a sua instituição</div>
+        <div class="pg-sub">Personalize o sistema para a sua instituição</div>
 
         <div class="card" style="margin-bottom:16px;">
           <div class="card-cabecalho"><span class="card-titulo">Identidade da Instituição</span></div>
@@ -1706,24 +1706,20 @@ let certAlunoSel = null;
 //  ARRANQUE
 // ══════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', async () => {
-  // Criar overlay de loading sem tocar no ecrã de login
-  const overlay = document.createElement('div');
-  overlay.id = 'loading-overlay';
-  overlay.style.cssText = 'position:fixed;inset:0;background:var(--fundo,#0a0a0a);display:flex;align-items:center;justify-content:center;z-index:9999;font-family:var(--fonte);color:var(--muted,#666);font-size:15px;';
-  overlay.textContent = '🔄 A ligar ao servidor...';
-  document.body.appendChild(overlay);
+  const loginEl = document.getElementById('ecra-login');
+
+  // Loading state
+  const loginOriginal = loginEl.innerHTML;
+  loginEl.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:var(--fonte);color:var(--muted);font-size:15px;">🔄 A ligar ao servidor...</div>';
 
   try {
     await BD.loadAll();
   } catch(e) {
-    overlay.style.color = '#b91c1c';
-    overlay.textContent = '❌ Erro ao ligar ao servidor. Verifique a ligação e recarregue a página.';
+    loginEl.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:var(--fonte);color:#b91c1c;font-size:15px;">❌ Erro ao ligar ao servidor. Verifique a ligação e recarregue a página.</div>';
     return;
   }
 
-  // Remover overlay — o ecrã de login original fica intacto
-  overlay.remove();
-
+  loginEl.innerHTML = loginOriginal;
   aplicarConfig();
   verificarActivacao();
 
@@ -2201,13 +2197,15 @@ async function salvarTurma() {
   } catch(e) {}
 }
 
-async function removerTurma(id) {
-  try {
-    await apiFetch('turmas_delete', { id });
-    await BD.reload('turmas');
-    renderTurmas();
-    toast('Aula removida', 'aviso');
-  } catch(e) {}
+function removerTurma(id) {
+    try {
+         apiFetch('turmas_delete', { id });
+         BD.reload('turmas');
+        renderTurmas();
+        toast('Aula removida', 'aviso');
+    } catch (erro) {
+        console.error("Erro ao remover turma:", erro);
+    }
 }
 
 // ══════════════════════════════════════════════
@@ -2362,13 +2360,692 @@ function carregarCertificados() {
       <div style="flex:1;">
         <div style="font-weight:700;font-size:14px;">${a.nome}</div>
         <div style="font-size:12px;color:var(--muted);margin-top:2px;">📚 ${curso?.nome || '—'} · ✅ ${presTotal} presenças</div>
-        ${motivo ? `<div style="font-size:11px;color:var(--laranja);margin-top:4px;">${motivo}</div>` : '<div style="font-size:11px;color:var(--verde);margin-top:4px;">✅ Pronto para emissão</div>'}
+        ${motivo ? `<div style="font-size:11px;color:var(--laranja);margin-top:4px;">${motivo}</div>` : '<div style="font-size:11px;color:var(--verde);margin-top:4px;">✅ Elegível para certificado</div>'}
       </div>
-      <div>
-        ${podeEmitir ? `<button class="btn btn-azul" onclick="abrirModalCert(${a.id})" style="font-size:12px;padding:6px 12px;">🏆 Emitir Certificado</button>` : `<button class="btn btn-cinza" disabled style="font-size:12px;padding:6px 12px;opacity:0.5;cursor:not-allowed;">Bloqueado</button>`}
-      </div>
+      <button class="btn ${podeEmitir ? 'btn-azul' : 'btn-cinza'}" onclick="${podeEmitir ? 'prepararCertificado(' + a.id + ')' : ''}" ${!podeEmitir ? 'disabled title="' + (motivo||'') + '"' : ''} style="font-size:12px;">
+        🏆 Emitir
+      </button>
     </div>`;
   }).join('');
+}
+
+function toggleTodosCerts(checked) {
+  document.querySelectorAll('.cert-check').forEach(cb => cb.checked = checked);
+  atualizarBotaoLote();
+}
+
+function atualizarBotaoLote() {
+  const selecionados = document.querySelectorAll('.cert-check:checked').length;
+  const btn = document.getElementById('btn-lote-cert');
+  btn.textContent = selecionados > 0 ? `🏆 Emitir ${selecionados} Certificados` : '🏆 Emitir Seleccionados';
+  btn.style.display = 'inline-flex';
+}
+
+function emitirCertificadosLote() {
+  const checks = document.querySelectorAll('.cert-check:checked');
+  if (checks.length === 0) { toast('Seleccione pelo menos um formando', 'aviso'); return; }
+  const ids = Array.from(checks).map(cb => parseInt(cb.dataset.id));
+
+  document.getElementById('conf-tit').textContent = '🏆 Emissão em Lote';
+  document.getElementById('conf-msg').innerHTML = `Vai emitir <strong>${ids.length} certificado(s)</strong>. Esta acção não pode ser desfeita. Confirmar?`;
+  document.getElementById('conf-ok-btn').textContent = 'Confirmar Emissão';
+  document.getElementById('conf-ok-btn').className = 'btn btn-azul';
+  document.getElementById('conf-ok-btn').onclick = async () => {
+    try {
+      for (const alunoId of ids) {
+        const a = (BD.get('alunos') || []).find(x => x.id === alunoId);
+        await apiFetch('certs_save', { alunoId, cursoId: a?.cursoId || null, utilizador: sessao.utilizador });
+      }
+      await BD.reload('certificados');
+      fecharModal('modal-conf');
+      toast(`${ids.length} certificado(s) emitido(s) com sucesso 🏆`, 'ok');
+      carregarCertificados();
+    } catch(e) {}
+  };
+  abrirModal('modal-conf');
+}
+
+function prepararCertificado(alunoId) {
+  const a = (BD.get('alunos') || []).find(x => x.id === alunoId);
+  const cursos = BD.get('cursos') || [];
+  const cfg = BD.get('config') || {};
+  const curso = cursos.find(c => c.id === a.cursoId);
+  certAlunoSel = alunoId;
+
+  document.getElementById('cert-preview-conteudo').innerHTML = `
+    <div class="cert-preview">
+      <div style="font-size:11px;color:var(--azul);letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;">Certificado de Conclusão</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:16px;">${cfg.nome || 'Centro de Formação'}</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:4px;">Certifica que</div>
+      <div style="font-family:var(--fonte-titulo);font-size:24px;font-weight:700;color:var(--azul);margin-bottom:12px;">${a.nome}</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:4px;">concluiu com sucesso o curso de</div>
+      <div style="font-size:18px;font-weight:700;color:var(--texto);margin-bottom:16px;">${curso?.nome || '—'}</div>
+      <div style="font-size:12px;color:var(--muted);">Emitido em ${formatarData(dataHoje())}</div>
+      ${cfg.morada ? `<div style="font-size:11px;color:var(--muted);margin-top:4px;">${cfg.morada}</div>` : ''}
+    </div>
+  `;
+  abrirModal('modal-cert');
+}
+
+async function emitirCertificadoFinal() {
+  if (!certAlunoSel) return;
+  const a = (BD.get('alunos') || []).find(x => x.id === certAlunoSel);
+  try {
+    await apiFetch('certs_save', { alunoId: certAlunoSel, cursoId: a?.cursoId || null, utilizador: sessao.utilizador });
+    await BD.reload('certificados');
+    fecharModal('modal-cert');
+    toast('Certificado emitido com sucesso 🏆', 'ok');
+    carregarCertificados();
+  } catch(e) {}
+}
+
+// ══════════════════════════════════════════════
+//  PROPINAS
+// ══════════════════════════════════════════════
+let filtroPropinasTexto = '';
+
+function carregarPropinas() {
+  const alunos = BD.get('alunos') || [];
+  const cursos = BD.get('cursos') || [];
+  const pagamentos = BD.get('pagamentos') || [];
+  const mes = dataHoje().substring(0, 7);
+
+  const recebidoMes = pagamentos.filter(p => p.data?.startsWith(mes)).reduce((s, p) => s + (p.valor || 0), 0);
+  const alunosActivos = alunos.filter(a => a.estado === 'Activo');
+  const semPagar = alunosActivos.filter(a => !pagamentos.find(p => p.alunoId === a.id && p.mes === mes));
+  const totalDivida = semPagar.reduce((s, a) => s + (a.propina || 0), 0);
+
+  document.getElementById('prop-pagos').textContent = fmt(recebidoMes);
+  document.getElementById('prop-divida').textContent = fmt(totalDivida);
+
+  renderTabelaPropinas();
+}
+
+function renderTabelaPropinas() {
+  const alunos = BD.get('alunos') || [];
+  const cursos = BD.get('cursos') || [];
+  const pagamentos = BD.get('pagamentos') || [];
+  const body = document.getElementById('tab-propinas');
+  const mes = dataHoje().substring(0, 7);
+
+  // Gerar uma linha por aluno activo para o mês actual
+  const alunosActivos = alunos.filter(a => a.estado === 'Activo' && a.nome.toLowerCase().includes(filtroPropinasTexto.toLowerCase()));
+
+  if (alunosActivos.length === 0) {
+    body.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted);">Nenhum resultado</td></tr>';
+    return;
+  }
+
+  body.innerHTML = alunosActivos.map(a => {
+    const curso = cursos.find(c => c.id === a.cursoId);
+    const pag = pagamentos.find(p => p.alunoId === a.id && p.mes === mes);
+
+    return `<tr>
+      <td style="font-weight:600;">${a.nome}</td>
+      <td>${curso ? `<span class="badge badge-roxo">${curso.nome}</span>` : '—'}</td>
+      <td style="color:var(--muted);font-size:12px;">${formatarMes(mes)}</td>
+      <td style="font-weight:600;">${fmt(a.propina)}</td>
+      <td>
+        <span class="badge ${pag ? 'badge-verde' : 'badge-vermelho'}">
+          ${pag ? '✅ Pago' : '⚠️ Em dívida'}
+        </span>
+      </td>
+      <td>
+        ${!pag ? `<button class="btn btn-verde" onclick="pagarRapido(${a.id})" style="font-size:11px;padding:5px 10px;">Registar pagamento</button>` : `<span style="font-size:12px;color:var(--muted);">pago em ${formatarData(pag.data)}</span>`}
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function pesquisarPropinas(val) { filtroPropinasTexto = val; renderTabelaPropinas(); }
+
+function pagarRapido(alunoId) {
+  const a = (BD.get('alunos') || []).find(x => x.id === alunoId);
+  if (!a) return;
+  document.getElementById('pag-aluno').value = alunoId;
+  abrirModalPagamento(alunoId);
+}
+
+function abrirModalPagamento(alunoIdSel) {
+  const alunos = (BD.get('alunos') || []).filter(a => a.estado === 'Activo');
+  const sel = document.getElementById('pag-aluno');
+  sel.innerHTML = alunos.map(a => `<option value="${a.id}" ${a.id == alunoIdSel ? 'selected' : ''}>${a.nome}</option>`).join('');
+
+  // Auto-preencher valor da propina
+  sel.onchange = () => {
+    const a = alunos.find(x => x.id == sel.value);
+    if (a) document.getElementById('pag-valor').value = a.propina || '';
+  };
+  if (alunoIdSel) {
+    const a = alunos.find(x => x.id == alunoIdSel);
+    if (a) document.getElementById('pag-valor').value = a.propina || '';
+  }
+
+  document.getElementById('pag-data').value = dataHoje();
+  document.getElementById('pag-mes').value = dataHoje().substring(0, 7);
+  document.getElementById('pag-desconto').value = '0';
+  document.getElementById('pag-obs').value = '';
+  abrirModal('modal-pagamento');
+}
+
+async function salvarPagamento() {
+  const alunoId = parseInt(document.getElementById('pag-aluno').value);
+  const mes = document.getElementById('pag-mes').value;
+  const valor = parseFloat(document.getElementById('pag-valor').value) || 0;
+  const desconto = parseFloat(document.getElementById('pag-desconto').value) || 0;
+  const metodo = document.getElementById('pag-metodo').value;
+  const data = document.getElementById('pag-data').value || dataHoje();
+  const obs = document.getElementById('pag-obs').value.trim();
+
+  if (!alunoId || valor <= 0) { toast('Seleccione o aluno e o valor', 'erro'); return; }
+
+  try {
+    await apiFetch('pagamentos_save', { alunoId, mes, valor, desconto, metodo, data, obs, utilizador: sessao.utilizador });
+    await BD.reload('pagamentos');
+    fecharModal('modal-pagamento');
+    carregarPropinas();
+    toast('Pagamento registado ✅', 'ok');
+  } catch(e) {}
+}
+
+// ══════════════════════════════════════════════
+//  RELATÓRIO
+// ══════════════════════════════════════════════
+function carregarRelatorio() {
+  const mesFiltro = document.getElementById('filtro-mes-rel').value || dataHoje().substring(0, 7);
+  const pagamentos = BD.get('pagamentos') || [];
+  const alunos = BD.get('alunos') || [];
+  const cursos = BD.get('cursos') || [];
+
+  const pagsMes = pagamentos.filter(p => p.data?.startsWith(mesFiltro));
+  const total = pagsMes.reduce((s, p) => s + (p.valor || 0), 0);
+  const alunosActivos = alunos.filter(a => a.estado === 'Activo').length;
+
+  document.getElementById('rel-periodo').textContent = 'Período: ' + formatarMes(mesFiltro);
+  document.getElementById('rel-total').textContent = fmt(total);
+  document.getElementById('rel-pagamentos').textContent = pagsMes.length;
+  document.getElementById('rel-alunos-ativos').textContent = alunosActivos;
+
+  const body = document.getElementById('tab-relatorio');
+  if (pagsMes.length === 0) {
+    body.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted);">Sem pagamentos neste período</td></tr>';
+    return;
+  }
+
+  body.innerHTML = [...pagsMes].reverse().map(p => {
+    const a = alunos.find(x => x.id === p.alunoId);
+    const curso = cursos.find(c => c.id === a?.cursoId);
+    return `<tr>
+      <td style="color:var(--muted);">${formatarData(p.data)}</td>
+      <td style="font-weight:600;">${a?.nome || '—'}</td>
+      <td>${curso ? `<span class="badge badge-roxo">${curso.nome}</span>` : '—'}</td>
+      <td style="color:var(--muted);font-size:12px;">${formatarMes(p.mes)}</td>
+      <td style="font-weight:700;color:var(--verde);">${fmt(p.valor)}</td>
+      <td style="color:${p.desconto > 0 ? 'var(--laranja)' : 'var(--muted)'};">${p.desconto > 0 ? '-' + fmt(p.desconto) : '—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ══════════════════════════════════════════════
+//  CONFIGURAÇÕES
+// ══════════════════════════════════════════════
+async function salvarConfig() {
+  const nome = document.getElementById('cfg-nome').value.trim();
+  const icone = document.getElementById('cfg-icone').value.trim() || '🎓';
+  const morada = document.getElementById('cfg-morada').value.trim();
+  if (!nome) { toast('Escreva o nome da instituição', 'erro'); return; }
+  try {
+    await apiFetch('config_set', { nome, icone, morada });
+    await BD.reload('config');
+    aplicarConfig();
+    toast('Configurações guardadas ✅', 'ok');
+  } catch(e) {}
+}
+
+function carregarUtils() {
+  const utils = BD.get('utilizadores') || [];
+  const body = document.getElementById('tab-utils');
+  body.innerHTML = utils.map(u => `<tr>
+    <td style="font-weight:500;">${u.nome}</td>
+    <td><span class="badge ${u.perfil === 'admin' ? 'badge-azul' : 'badge-cinza'}">${u.perfil === 'admin' ? 'Administrador' : 'Recepcionista'}</span></td>
+    <td style="display:flex;gap:6px;">
+      <button class="btn btn-cinza" onclick="editarUtil(${u.id})" style="font-size:11px;padding:4px 9px;">Editar</button>
+      ${u.nome !== 'admin' ? `<button class="btn btn-vermelho" onclick="removerUtil(${u.id})" style="font-size:11px;padding:4px 9px;">Remover</button>` : '<span style="color:var(--muted);font-size:12px;line-height:2;">Protegido</span>'}
+    </td>
+  </tr>`).join('');
+}
+
+function abrirModalUtil() {
+  document.getElementById('modal-util-tit').textContent = 'Novo Utilizador';
+  document.getElementById('util-id').value = '';
+  document.getElementById('util-nome').value = '';
+  document.getElementById('util-nome').readOnly = false;
+  document.getElementById('util-pass').value = '';
+  document.getElementById('util-pass-hint').style.display = 'none';
+  document.getElementById('util-btn-guardar').textContent = 'Criar';
+  abrirModal('modal-util');
+}
+
+function editarUtil(id) {
+  const u = (BD.get('utilizadores') || []).find(x => x.id == id);
+  if (!u) return;
+  document.getElementById('modal-util-tit').textContent = 'Editar Utilizador';
+  document.getElementById('util-id').value = u.id;
+  document.getElementById('util-nome').value = u.nome;
+  document.getElementById('util-nome').readOnly = true;
+  document.getElementById('util-pass').value = '';
+  document.getElementById('util-pass-hint').style.display = 'block';
+  document.getElementById('util-perfil').value = u.perfil || 'recepcao';
+  document.getElementById('util-btn-guardar').textContent = 'Guardar';
+  abrirModal('modal-util');
+}
+
+async function salvarUtil() {
+  const id = parseInt(document.getElementById('util-id').value) || 0;
+  const nome = document.getElementById('util-nome').value.trim().toLowerCase();
+  const pass = document.getElementById('util-pass').value;
+  const perfil = document.getElementById('util-perfil').value;
+
+  if (!nome) { toast('Nome obrigatório', 'erro'); return; }
+
+  if (id === 0) {
+    // Criar novo
+    if (!pass) { toast('Senha obrigatória', 'erro'); return; }
+    const utils = BD.get('utilizadores') || [];
+    if (utils.find(u => u.nome === nome)) { toast('Utilizador já existe', 'erro'); return; }
+    try {
+      await apiFetch('utils_save', { id: 0, nome, senha: pass, perfil });
+      await BD.reload('utilizadores');
+      fecharModal('modal-util');
+      carregarUtils();
+      toast('Utilizador criado ✅', 'ok');
+    } catch(e) {}
+  } else {
+    // Editar existente
+    try {
+      await apiFetch('utils_save', { id, nome, senha: pass, perfil });
+      await BD.reload('utilizadores');
+      fecharModal('modal-util');
+      carregarUtils();
+      toast('Utilizador actualizado ✅', 'ok');
+    } catch(e) {}
+  }
+}
+
+async function removerUtil(id) {
+  try {
+    await apiFetch('utils_delete', { id });
+    await BD.reload('utilizadores');
+    carregarUtils();
+    toast('Utilizador removido', 'aviso');
+  } catch(e) {}
+}
+
+async function exportar() {
+  try {
+    const dados = await apiFetch('export', null, true);
+    const blob = new Blob([JSON.stringify(dados, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'backup-formacao-' + dataHoje() + '.json';
+    a.click();
+    toast('Backup exportado ✅', 'ok');
+  } catch(e) {}
+}
+
+function confirmarReset() {
+  document.getElementById('conf-tit').textContent = '⚠️ Apagar Tudo';
+  document.getElementById('conf-msg').textContent = 'Funcionalidade desactivada nesta versão com base de dados partilhada. Contacte a Luzayadio para assistência.';
+  document.getElementById('conf-ok-btn').style.display = 'none';
+  abrirModal('modal-conf');
+}
+
+// ══════════════════════════════════════════════
+//  FATURAS
+// ══════════════════════════════════════════════
+let filtroFaturasTexto = '';
+
+function carregarFaturas() {
+  const mesFiltro = document.getElementById('filtro-mes-fat')?.value || dataHoje().substring(0, 7);
+  const pagamentos = BD.get('pagamentos') || [];
+  const alunos = BD.get('alunos') || [];
+  const cursos = BD.get('cursos') || [];
+  const body = document.getElementById('tab-faturas');
+
+  let lista = pagamentos.filter(p => p.data?.startsWith(mesFiltro));
+  if (filtroFaturasTexto) {
+    lista = lista.filter(p => {
+      const a = alunos.find(x => x.id === p.alunoId);
+      return a?.nome?.toLowerCase().includes(filtroFaturasTexto.toLowerCase());
+    });
+  }
+
+  if (lista.length === 0) {
+    body.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted);">Sem pagamentos neste período</td></tr>';
+    return;
+  }
+
+  let seq = 1;
+  body.innerHTML = [...lista].reverse().map((p, i) => {
+    const a = alunos.find(x => x.id === p.alunoId);
+    const curso = cursos.find(c => c.id === a?.cursoId);
+    const numFat = String(p.id).slice(-4).padStart(4, '0');
+    return `<tr>
+      <td style="color:var(--muted);font-size:12px;">FAT-${numFat}</td>
+      <td style="color:var(--muted);">${formatarData(p.data)}</td>
+      <td style="font-weight:600;">${a?.nome || '—'}</td>
+      <td>${curso ? `<span class="badge badge-roxo">${curso.nome}</span>` : '—'}</td>
+      <td style="color:var(--muted);font-size:12px;">${formatarMes(p.mes)}</td>
+      <td style="font-weight:700;color:var(--verde);">${fmt(p.valor)}</td>
+      <td><span class="badge badge-cinza">${p.metodo || 'Dinheiro'}</span></td>
+      <td><button class="btn btn-azul" onclick="emitirFatura('${p.id}')" style="font-size:11px;padding:5px 10px;">🧾 Emitir</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function pesquisarFaturas(val) { filtroFaturasTexto = val; carregarFaturas(); }
+
+function emitirFatura(pagId) {
+  const pagamentos = BD.get('pagamentos') || [];
+  const alunos = BD.get('alunos') || [];
+  const cursos = BD.get('cursos') || [];
+  const cfg = BD.get('config') || {};
+
+  const p = pagamentos.find(x => String(x.id) === String(pagId));
+  if (!p) return;
+  const a = alunos.find(x => x.id === p.alunoId);
+  const curso = cursos.find(c => c.id === a?.cursoId);
+  const numFat = 'FAT-' + String(p.id).slice(-4).padStart(4, '0');
+
+  const valorLiquido = (p.valor || 0) - (p.desconto || 0);
+
+  document.getElementById('fatura-conteudo').innerHTML = `
+    <div class="fatura-header">
+      <div>
+        <div class="fatura-titulo">Recibo / Fatura</div>
+        <div class="fatura-numero">${numFat}</div>
+      </div>
+      <div style="text-align:right;">
+        <div class="fatura-inst-nome">${cfg.icone || '🎓'} ${cfg.nome || 'Centro de Formação'}</div>
+        ${cfg.morada ? `<div style="font-size:11px;color:var(--muted);margin-top:3px;">${cfg.morada}</div>` : ''}
+        <div style="font-size:11px;color:var(--muted);margin-top:3px;">Desenvolvido por <strong>Luzayadio</strong></div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:16px;">
+      <div>
+        <div class="fatura-secao">Cliente</div>
+        <div style="font-weight:700;font-size:15px;">${a?.nome || '—'}</div>
+        ${a?.tel ? `<div style="font-size:12px;color:var(--muted);">📞 ${a.tel}</div>` : ''}
+        ${a?.bi ? `<div style="font-size:12px;color:var(--muted);">BI: ${a.bi}</div>` : ''}
+      </div>
+      <div style="text-align:right;">
+        <div class="fatura-secao">Detalhes</div>
+        <div style="font-size:12px;color:var(--muted);">Data: <strong style="color:var(--texto);">${formatarData(p.data)}</strong></div>
+        <div style="font-size:12px;color:var(--muted);">Método: <strong style="color:var(--texto);">${p.metodo || 'Dinheiro'}</strong></div>
+        <div style="font-size:12px;color:var(--muted);">Regist. por: <strong style="color:var(--texto);">${p.utilizador || '—'}</strong></div>
+      </div>
+    </div>
+
+    <div class="fatura-secao">Descrição do Serviço</div>
+    <table class="fatura-tabela">
+      <thead>
+        <tr>
+          <th>Descrição</th>
+          <th>Período</th>
+          <th style="text-align:right;">Valor</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Propina — ${curso?.nome || 'Curso'}</td>
+          <td style="color:var(--muted);">${formatarMes(p.mes)}</td>
+          <td style="text-align:right;font-weight:600;">${fmt(p.valor)}</td>
+        </tr>
+        ${p.desconto > 0 ? `<tr>
+          <td style="color:var(--laranja);">Desconto aplicado</td>
+          <td></td>
+          <td style="text-align:right;color:var(--laranja);">- ${fmt(p.desconto)}</td>
+        </tr>` : ''}
+        ${p.obs ? `<tr><td colspan="3" style="font-size:11px;color:var(--muted);font-style:italic;">Obs: ${p.obs}</td></tr>` : ''}
+      </tbody>
+    </table>
+
+    <div class="fatura-total-box">
+      <span style="font-size:15px;font-weight:600;">Total Pago</span>
+      <span style="font-family:var(--fonte-titulo);font-size:22px;font-weight:700;">${fmt(valorLiquido)}</span>
+    </div>
+
+    <div class="fatura-rodape">
+      Este documento serve como comprovativo de pagamento.<br>
+      <strong>${cfg.nome || 'Centro de Formação'}</strong> — Sistema gerido por <strong>Luzayadio</strong>
+    </div>
+  `;
+  abrirModal('modal-fatura');
+}
+
+function imprimirFatura() { window.print(); }
+
+// ══════════════════════════════════════════════
+//  IMPORTAR BACKUP
+// ══════════════════════════════════════════════
+function importarBackup() {
+  toast('Importação de backup não disponível nesta versão com base de dados. Contacte a Luzayadio.', 'aviso');
+}
+
+function processarImportacao(input) { input.value = ''; }
+
+// ══════════════════════════════════════════════
+//  SENHAS ROTATIVAS
+// ══════════════════════════════════════════════
+function carregarSenhasRotativas() {
+  const sr = BD.get('senhas_rotativas') || { dataAtivacao: '', senhas: [], totalMeses: 10 };
+  document.getElementById('cfg-data-ativacao').value = sr.dataAtivacao || '';
+  document.getElementById('cfg-total-meses').value = sr.totalMeses || 10;
+  renderSenhasRotativas(sr);
+}
+
+function renderSenhasRotativas(sr) {
+  if (!sr) sr = BD.get('senhas_rotativas') || { dataAtivacao: '', senhas: [], totalMeses: 10 };
+  const total = parseInt(document.getElementById('cfg-total-meses')?.value) || sr.totalMeses || 10;
+  const mesAtual = sr.dataAtivacao ? calcularMesAtual(sr.dataAtivacao) : 0;
+  const container = document.getElementById('lista-senhas-rotativas');
+  if (!container) return;
+
+  // Actualizar badge
+  const badge = document.getElementById('badge-mes-atual-senha');
+  if (badge) badge.textContent = sr.dataAtivacao ? `Mês ${mesAtual} activo` : 'Sem activação';
+
+  let html = '';
+  for (let i = 0; i < total; i++) {
+    const mesNum = i + 1;
+    const senha = sr.senhas?.[i] || '';
+    const isAtiva = mesNum === mesAtual;
+    const isUsada = mesNum < mesAtual;
+    const cls = isAtiva ? 'activa' : isUsada ? 'usada' : 'futura';
+    const label = isAtiva ? '✅ Activa agora' : isUsada ? '✔ Já usada' : `Mês ${mesNum}`;
+
+    html += `<div class="senha-slot ${cls}">
+      <div class="senha-slot-num">${mesNum}</div>
+      <div style="flex:1;">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:3px;">${label}</div>
+        <input type="text" value="${senha}" placeholder="Senha para o mês ${mesNum}"
+          id="sr-senha-${i}"
+          style="width:100%;background:${isUsada?'transparent':'var(--branco)'};border:1px solid var(--borda);border-radius:7px;padding:6px 10px;font-family:var(--fonte);font-size:13px;outline:none;${isUsada?'opacity:0.5;':''}"
+          ${isUsada ? 'readonly' : ''}>
+      </div>
+    </div>`;
+  }
+  container.innerHTML = html;
+}
+
+function gerarSenhasAleatorias() {
+  const total = parseInt(document.getElementById('cfg-total-meses').value) || 10;
+  const sr = BD.get('senhas_rotativas') || {};
+  const mesAtual = sr.dataAtivacao ? calcularMesAtual(sr.dataAtivacao) : 0;
+  for (let i = 0; i < total; i++) {
+    const el = document.getElementById('sr-senha-' + i);
+    if (el && !el.readOnly) {
+      // Gera senha de 8 chars alfanumérica
+      el.value = Math.random().toString(36).substring(2, 6).toUpperCase() + Math.random().toString(36).substring(2, 6).toUpperCase();
+    }
+  }
+  toast('Senhas geradas. Não esqueça de guardar!', 'aviso');
+}
+
+async function salvarSenhasRotativas() {
+  const dataAtivacao = document.getElementById('cfg-data-ativacao').value;
+  const totalMeses = parseInt(document.getElementById('cfg-total-meses').value) || 10;
+  if (!dataAtivacao) { toast('Defina a data de activação', 'erro'); return; }
+
+  const sr = BD.get('senhas_rotativas') || {};
+  const senhas = [];
+  for (let i = 0; i < totalMeses; i++) {
+    const el = document.getElementById('sr-senha-' + i);
+    senhas.push(el ? el.value.trim() : (sr.senhas?.[i] || ''));
+  }
+
+  try {
+    await apiFetch('sr_set', { dataAtivacao, senhas, totalMeses });
+    await BD.reload('senhas_rotativas');
+    toast('Senhas rotativas guardadas ✅', 'ok');
+    carregarSenhasRotativas();
+  } catch(e) {}
+}
+
+
+function imprimirCursos() {
+  const cursos = BD.get('cursos') || [];
+  const alunos = BD.get('alunos') || [];
+  const cfg = BD.get('config') || {};
+  if (cursos.length === 0) { toast('Sem cursos para imprimir', 'aviso'); return; }
+
+  const linhas = cursos.map(c => {
+    const inscritos = alunos.filter(a => a.cursoId === c.id && a.estado === 'Activo').length;
+    return `<tr>
+      <td style="font-weight:600;">${c.nome}</td>
+      <td>${c.duracao || '—'}</td>
+      <td style="font-weight:700;">${fmt(c.valor)}/mês</td>
+      <td style="text-align:center;">${inscritos}</td>
+      <td>${c.desc || '—'}</td>
+    </tr>`;
+  }).join('');
+
+  const printHtml = `
+    <div style="font-family:sans-serif;padding:20px;max-width:900px;margin:0 auto;">
+      <div style="text-align:center;margin-bottom:20px;border-bottom:2px solid #1d4ed8;padding-bottom:12px;">
+        <div style="font-size:20px;font-weight:700;color:#1d4ed8;">${cfg.icone || '🎓'} ${cfg.nome || 'Centro de Formação'}</div>
+        <div style="font-size:14px;color:#666;margin-top:4px;">Lista de Cursos</div>
+        <div style="font-size:11px;color:#999;margin-top:2px;">Emitida em ${formatarData(dataHoje())}</div>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px;">
+        <thead><tr style="background:#f4f1eb;">
+          <th style="padding:9px;border:1px solid #ddd;text-align:left;">Curso</th>
+          <th style="padding:9px;border:1px solid #ddd;text-align:left;">Duração</th>
+          <th style="padding:9px;border:1px solid #ddd;text-align:left;">Propina</th>
+          <th style="padding:9px;border:1px solid #ddd;text-align:center;">Inscritos</th>
+          <th style="padding:9px;border:1px solid #ddd;text-align:left;">Descrição</th>
+        </tr></thead>
+        <tbody>${linhas}</tbody>
+      </table>
+      <div style="margin-top:20px;text-align:center;font-size:10px;color:#999;border-top:1px solid #ddd;padding-top:10px;">
+        Sistema gerido por <strong>Luzayadio</strong>
+      </div>
+    </div>`;
+
+  const area = document.getElementById('cursos-print-area');
+  area.innerHTML = printHtml;
+  area.className = 'print-area';
+  window.print();
+  setTimeout(() => { area.innerHTML = ''; area.className = ''; }, 1000);
+}
+
+function imprimirAulas() {
+  const turmas = BD.get('turmas') || [];
+  const cursos = BD.get('cursos') || [];
+  const alunos = BD.get('alunos') || [];
+  const cfg = BD.get('config') || {};
+  if (turmas.length === 0) { toast('Sem aulas para imprimir', 'aviso'); return; }
+
+  const linhas = turmas.map(t => {
+    const curso = cursos.find(c => c.id === t.cursoId);
+    const inscritos = alunos.filter(a => a.turmaId === t.id && a.estado === 'Activo').length;
+    const estadoCor = {'Em curso':'#15803d','Agendada':'#1d4ed8','Concluída':'#8a8680'}[t.estado] || '#666';
+    return `<tr>
+      <td style="font-weight:600;">${t.nome}</td>
+      <td>${curso?.nome || '—'}</td>
+      <td>${t.horario || '—'}</td>
+      <td>${t.formador || '—'}</td>
+      <td style="text-align:center;">${inscritos}/${t.vagas}</td>
+      <td>${t.inicio ? formatarData(t.inicio) : '—'}</td>
+      <td>${t.fim ? formatarData(t.fim) : '—'}</td>
+      <td style="font-weight:700;color:${estadoCor};">${t.estado}</td>
+    </tr>`;
+  }).join('');
+
+  const printHtml = `
+    <div style="font-family:sans-serif;padding:20px;max-width:1000px;margin:0 auto;">
+      <div style="text-align:center;margin-bottom:20px;border-bottom:2px solid #1d4ed8;padding-bottom:12px;">
+        <div style="font-size:20px;font-weight:700;color:#1d4ed8;">${cfg.icone || '🎓'} ${cfg.nome || 'Centro de Formação'}</div>
+        <div style="font-size:14px;color:#666;margin-top:4px;">Lista de Aulas</div>
+        <div style="font-size:11px;color:#999;margin-top:2px;">Emitida em ${formatarData(dataHoje())}</div>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:11px;">
+        <thead><tr style="background:#f4f1eb;">
+          <th style="padding:9px;border:1px solid #ddd;text-align:left;">Aula</th>
+          <th style="padding:9px;border:1px solid #ddd;text-align:left;">Curso</th>
+          <th style="padding:9px;border:1px solid #ddd;text-align:left;">Horário</th>
+          <th style="padding:9px;border:1px solid #ddd;text-align:left;">Professor</th>
+          <th style="padding:9px;border:1px solid #ddd;text-align:center;">Alunos/Vagas</th>
+          <th style="padding:9px;border:1px solid #ddd;text-align:left;">Início</th>
+          <th style="padding:9px;border:1px solid #ddd;text-align:left;">Fim</th>
+          <th style="padding:9px;border:1px solid #ddd;text-align:left;">Estado</th>
+        </tr></thead>
+        <tbody>${linhas}</tbody>
+      </table>
+      <div style="margin-top:20px;text-align:center;font-size:10px;color:#999;border-top:1px solid #ddd;padding-top:10px;">
+        Sistema gerido por <strong>Luzayadio</strong>
+      </div>
+    </div>`;
+
+  const area = document.getElementById('cursos-print-area');
+  area.innerHTML = printHtml;
+  area.className = 'print-area';
+  window.print();
+  setTimeout(() => { area.innerHTML = ''; area.className = ''; }, 1000);
+}
+
+function fmt(v) { return new Intl.NumberFormat('pt-AO').format(v || 0) + ' Kzs'; }
+function dataHoje() { return new Date().toISOString().split('T')[0]; }
+
+function formatarData(d) {
+  if (!d) return '—';
+  const [a, m, di] = d.split('-');
+  return `${di}/${m}/${a}`;
+}
+
+function formatarMes(m) {
+  if (!m) return '—';
+  const [a, mes] = m.split('-');
+  const nomes = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  return nomes[parseInt(mes) - 1] + ' ' + a;
+}
+
+function abrirModal(id) { document.getElementById(id).classList.add('aberto'); }
+function fecharModal(id) { document.getElementById(id).classList.remove('aberto'); }
+
+document.addEventListener('click', e => {
+  if (e.target.classList.contains('overlay')) e.target.classList.remove('aberto');
+});
+
+function toast(msg, tipo = 'ok') {
+  const c = document.getElementById('toasts');
+  const ic = tipo === 'ok' ? '✅' : tipo === 'erro' ? '❌' : '⚠️';
+  const d = document.createElement('div');
+  d.className = `toast ${tipo}`;
+  d.innerHTML = `<span>${ic}</span><span>${msg}</span>`;
+  c.appendChild(d);
+  setTimeout(() => d.remove(), 3500);
 }
 </script>
 </body>
