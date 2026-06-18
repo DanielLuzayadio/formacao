@@ -7,17 +7,25 @@
 error_reporting(E_ALL);
 ini_set('display_errors', 0);
 
-header('Content-Type: application/json; charset=utf-8');
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type');
-
+function db() {
+    static $c = null;
+    if ($c) return $c;
+    
+    // Configuração Direta com os teus dados públicos do Railway
+    $host = 'thomas.proxy.rlwy.net:19318'; // O teu host público + porta
+    $user = 'root';
+    $pass = 'kRiumtfUITaSOWzQarxAGSLVmsPtHoDZ'; // A tua senha do MySQL
+    $db   = 'railway';
+    
+    $c = new mysqli($host, $user, $pass, $db);
+    return $c;
+}
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(204); exit; }
 
 // ------------------------------------------------------------
 //  CONFIG BD — editar estas 4 linhas
 // ------------------------------------------------------------
-define('DB_HOST', 'mysql.railway.internal:3306');
+define('DB_HOST', 'mysql://root:kRiumtfUITaSOWzQarxAGSLVmsPtHoDZ@thomas.proxy.rlwy.net:19371/railway');
 define('DB_USER', 'root');
 define('DB_PASS', 'kRiumtfUITaSOWzQarxAGSLVmsPtHoDZ');
 define('DB_NAME', 'railway');
