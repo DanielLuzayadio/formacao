@@ -17,7 +17,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(204); exit; }
 // ------------------------------------------------------------
 //  CONFIG BD — editar estas 4 linhas
 // ------------------------------------------------------------
-define('DB_HOST', 'mysql.railway.internal');
+define('DB_HOST', 'mysql.railway.internal:3306');
 define('DB_USER', 'root');
 define('DB_PASS', 'kRiumtfUITaSOWzQarxAGSLVmsPtHoDZ');
 define('DB_NAME', 'railway');
